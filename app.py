@@ -15,16 +15,7 @@ for message in st.session_state['message_history']:
      with st.chat_message(message['role']):
           st.text(message['content'])
 
-# user message
-with st.chat_message('user'):
-    st.text('Hi')
 
-# AI message
-with st.chat_message('assistant'):
-    st.text('How can i hepl you?')
-
-with st.chat_message('user'):
-    st.text('My name is Aditya')
 
 
 # making chatbox
