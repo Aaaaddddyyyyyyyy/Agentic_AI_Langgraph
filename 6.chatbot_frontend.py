@@ -1,5 +1,5 @@
 import streamlit as st
-from 5.chatbot import chatbot
+from chatbot import chatbot
 from langchain_core.messages import HumanMessage
 
 CONFIG = {'configurable' : {'thread_id': 'thread1'}}
