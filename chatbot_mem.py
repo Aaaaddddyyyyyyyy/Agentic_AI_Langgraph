@@ -32,11 +32,12 @@ checkpointer = MemorySaver()
 
 chatbot = graph.compile(checkpointer=checkpointer)
 
-stream = chatbot.stream(
+
+for message_chunk,metadata in chatbot.stream(
     {'messages':[HumanMessage(content='what is the reciepe to make pasta?')]},
     config = {'configurable' : {'thread_id': 'thread1'}},
     stream_mode='messages'
 
-)
-
-print(type(stream))
+):
+    if message_chunk.content:
+        print(message_chunk.content,end=" ",flush=True)
