@@ -10,3 +10,8 @@ with st.chat_message('assistant'):
 
 with st.chat_message('user'):
     st.text('My name is Aditya')
+
+
+# making chatbox
+
+user_input=st.chat_input('Type your message here')
