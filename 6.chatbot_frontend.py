@@ -7,3 +7,6 @@ with st.chat_message('user'):
 # AI message
 with st.chat_message('assistant'):
     st.text('How can i hepl you?')
+
+with st.chat_message('user'):
+    st.text('My name is Aditya')
