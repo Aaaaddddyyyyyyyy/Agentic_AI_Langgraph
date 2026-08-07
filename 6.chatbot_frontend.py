@@ -15,3 +15,8 @@ with st.chat_message('user'):
 # making chatbox
 
 user_input=st.chat_input('Type your message here')
+
+#minking user input to chatbox
+if user_input:
+    with st.chat_message('user'):
+        st.text(user_input)
