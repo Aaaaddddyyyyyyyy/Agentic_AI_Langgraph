@@ -46,15 +46,8 @@ for message_chunk,metadata in chatbot.stream(
     if message_chunk.content:
         print(message_chunk.content,end=" ",flush=True)
 
+all_threads = set()
+for checkpoint in checkpointer.list(None):
+    all_threads.add(checkpoint.config['configurable']['thread_id'])
 
-## test
-
-CONFIG={'configurable':{'thread_id':'thread-1'}}
-
-response=chatbot.invoke(
-    {'messages':[HumanMessage(content='what is my name')]},
-    config=CONFIG
-)
-
-
-print(response)
+print(list(all_threads))
