@@ -52,7 +52,7 @@ for message_chunk,metadata in chatbot.stream(
 CONFIG={'configurable':{'thread_id':'thread-1'}}
 
 response=chatbot.invoke(
-    {'messages':[HumanMessage(content='hi my name is aditya')]},
+    {'messages':[HumanMessage(content='what is my name')]},
     config=CONFIG
 )
 
