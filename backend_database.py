@@ -29,10 +29,10 @@ graph.add_node("chat_node", chat_node)
 graph.add_edge(START, "chat_node")
 graph.add_edge("chat_node", END)
 
+conn=sqlite3.connect(database='chatbot_db',check_same_thread=False)
 
 
-
-checkpointer = SqliteSaver()
+checkpointer = SqliteSaver(conn=conn)
 
 chatbot = graph.compile(checkpointer=checkpointer)
 
@@ -45,3 +45,16 @@ for message_chunk,metadata in chatbot.stream(
 ):
     if message_chunk.content:
         print(message_chunk.content,end=" ",flush=True)
+
+
+## test
+
+CONFIG={'configurable':{'thread_id':'thread-1'}}
+
+response=chatbot.invoke(
+    {'messages':[HumanMessage(content='hi my name is aditya')]},
+    config=CONFIG
+)
+
+
+print(response)
