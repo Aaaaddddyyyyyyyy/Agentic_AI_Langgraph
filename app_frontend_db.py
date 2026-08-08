@@ -1,5 +1,5 @@
 import streamlit as st
-from backend_database import chatbot , retrieve_all_threads
+from backend_database import chatbot, retrieve_all_threads
 from langchain_core.messages import HumanMessage
 import uuid
 
@@ -16,15 +16,14 @@ def reset_chat():
     thread_id = generate_thread_id()
 
     st.session_state["thread_id"] = thread_id
-
-    add_thread(thread_id, "New Chat")
-
     st.session_state["message_history"] = []
 
+    add_thread(thread_id)
 
-def add_thread(thread_id, title="New Chat"):
+
+def add_thread(thread_id):
     if thread_id not in st.session_state["chat_threads"]:
-        st.session_state["chat_threads"][thread_id] = title
+        st.session_state["chat_threads"].append(thread_id)
 
 
 def load_conversation(thread_id):
@@ -59,23 +58,23 @@ add_thread(st.session_state["thread_id"])
 
 
 # ============================================================
-# Sidebar UI
+# Sidebar
 # ============================================================
 
 st.sidebar.title("AdBoT")
 
 
-if st.sidebar.button("New Chat"):
+if st.sidebar.button("➕ New Chat"):
     reset_chat()
 
 
 st.sidebar.header("My Conversations")
 
 
-for thread_id, title in st.session_state["chat_threads"].items():
+for thread_id in st.session_state["chat_threads"]:
 
     if st.sidebar.button(
-        title,
+        str(thread_id),
         key=f"thread_{thread_id}"
     ):
 
@@ -119,7 +118,7 @@ for message in st.session_state["message_history"]:
 # Chat Input
 # ============================================================
 
-user_input = st.chat_input("Type here")
+user_input = st.chat_input("Type here...")
 
 
 if user_input:
@@ -148,25 +147,8 @@ if user_input:
     }
 
 
-    current_thread = st.session_state["thread_id"]
-
-
     # --------------------------------------------------------
-    # Generate chat title
-    # --------------------------------------------------------
-
-    if st.session_state["chat_threads"][current_thread] == "New Chat":
-
-        title = user_input[:30]
-
-        if len(user_input) > 30:
-            title += "..."
-
-        st.session_state["chat_threads"][current_thread] = title
-
-
-    # --------------------------------------------------------
-    # AI response - Streaming
+    # Stream AI response
     # --------------------------------------------------------
 
     with st.chat_message("assistant"):
@@ -186,7 +168,7 @@ if user_input:
 
 
     # --------------------------------------------------------
-    # Save AI response
+    # Save AI response to UI history
     # --------------------------------------------------------
 
     st.session_state["message_history"].append({
