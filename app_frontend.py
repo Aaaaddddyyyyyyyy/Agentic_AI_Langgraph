@@ -98,6 +98,13 @@ for thread_id in st.session_state["chat_threads"]:
 
         st.session_state["message_history"] = temp_messages
 
+        st.sidebar.markdown("### 🔍 Search")
+
+search = st.sidebar.text_input(
+    "Search",
+    placeholder="Search conversations..."
+)
+
 
 # ============================================================
 # Main UI
