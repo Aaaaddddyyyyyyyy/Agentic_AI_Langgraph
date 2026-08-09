@@ -140,12 +140,19 @@ if user_input:
     # Configuration
     # --------------------------------------------------------
 
+    #CONFIG = {
+       # "configurable": {
+       #     "thread_id": st.session_state["thread_id"]
+      #  }
+   # }
+    
     CONFIG = {
-        "configurable": {
+        "configurable": {"thread_id": st.session_state["thread_id"]},
+        "metadata": {
             "thread_id": st.session_state["thread_id"]
-        }
+        },
+        "run_name": "chat_turn",
     }
-
 
     # --------------------------------------------------------
     # Stream AI response
