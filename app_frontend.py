@@ -58,29 +58,50 @@ add_thread(st.session_state["thread_id"])
 
 
 # ============================================================
+# ============================================================
 # Sidebar
 # ============================================================
 
 st.sidebar.title("AdBoT")
 
-
+# New Chat
 if st.sidebar.button("➕ New Chat"):
     reset_chat()
 
-
 st.sidebar.header("My Conversations")
 
+# Search conversations
+search = st.sidebar.text_input(
+    "🔍 Search",
+    placeholder="Search conversations..."
+)
 
+# Display conversations
 for thread_id in st.session_state["chat_threads"]:
 
+    # Get messages for this conversation
+    messages = load_conversation(thread_id)
+
+    # Default title
+    title = "New Chat"
+
+    # Get first user message as title
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            title = msg.content[:30]
+            break
+
+    # Apply search filter
+    if search and search.lower() not in title.lower():
+        continue
+
+    # Show conversation title instead of thread ID
     if st.sidebar.button(
-        str(thread_id),
+        title,
         key=f"thread_{thread_id}"
     ):
 
         st.session_state["thread_id"] = thread_id
-
-        messages = load_conversation(thread_id)
 
         temp_messages = []
 
@@ -98,12 +119,7 @@ for thread_id in st.session_state["chat_threads"]:
 
         st.session_state["message_history"] = temp_messages
 
-        st.sidebar.markdown("### 🔍 Search")
-
-search = st.sidebar.text_input(
-    "Search",
-    placeholder="Search conversations..."
-)
+        st.rerun()
 
 
 # ============================================================
