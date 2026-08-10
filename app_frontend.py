@@ -2,6 +2,8 @@ import streamlit as st
 from backend_database import chatbot, retrieve_all_threads
 from langchain_core.messages import HumanMessage, AIMessage,ToolMessage
 import uuid
+from backend_database import chatbot,ingest_pdf,retrieve_all_threads,thread_document_metadata
+                              
 
 
 # ============================================================
@@ -55,6 +57,11 @@ if "chat_threads" not in st.session_state:
 
 
 add_thread(st.session_state["thread_id"])
+
+thread_key = str(st.session_state["thread_id"])
+thread_docs = st.session_state["ingested_docs"].setdefault(thread_key, {})
+threads = st.session_state["chat_threads"][::-1]
+selected_thread = None
 
 
 # ============================================================
@@ -121,6 +128,35 @@ for thread_id in st.session_state["chat_threads"]:
 
         st.rerun()
 
+st.sidebar.title("LangGraph PDF Chatbot")
+st.sidebar.markdown(f"**Thread ID:** `{thread_key}`")
+
+if st.sidebar.button("New Chat", use_container_width=True):
+    reset_chat()
+    st.rerun()
+
+if thread_docs:
+    latest_doc = list(thread_docs.values())[-1]
+    st.sidebar.success(
+        f"Using `{latest_doc.get('filename')}` "
+        f"({latest_doc.get('chunks')} chunks from {latest_doc.get('documents')} pages)"
+    )
+else:
+    st.sidebar.info("No PDF indexed yet.")
+
+uploaded_pdf = st.sidebar.file_uploader("Upload a PDF for this chat", type=["pdf"])
+if uploaded_pdf:
+    if uploaded_pdf.name in thread_docs:
+        st.sidebar.info(f"`{uploaded_pdf.name}` already processed for this chat.")
+    else:
+        with st.sidebar.status("Indexing PDF…", expanded=True) as status_box:
+            summary = ingest_pdf(
+                uploaded_pdf.getvalue(),
+                thread_id=thread_key,
+                filename=uploaded_pdf.name,
+            )
+            thread_docs[uploaded_pdf.name] = summary
+            status_box.update(label="✅ PDF indexed", state="complete", expanded=False)
 
 # ============================================================
 # Main UI
