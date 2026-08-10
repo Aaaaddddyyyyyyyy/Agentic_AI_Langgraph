@@ -1,218 +1,490 @@
-from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Annotated
-from langchain_core.messages import BaseMessage,HumanMessage
-from langchain_groq import ChatGroq
-from langgraph.checkpoint.sqlite import SqliteSaver
-from dotenv import load_dotenv
-from langgraph.graph.message import add_messages
-import sqlite3
-import requests
-from langchain_community.tools import DuckDuckGoSearchRun
+# ============================================================
+# IMPORTS
+# ============================================================
+
+from langgraph.graph import StateGraph, START
+from typing import TypedDict, Annotated, Dict, Any, Optional
+
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
-import random
-from langgraph.prebuilt import ToolNode,tools_condition
+
+from langchain_groq import ChatGroq
+
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+
+from dotenv import load_dotenv
+
+import sqlite3
+import requests
+import tempfile
+import os
 
 
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
 
 load_dotenv()
 
+
+# ============================================================
+# STATE
+# ============================================================
 
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile")
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-vector_store= FAISS.from_documents(chunks, embeddings)
+# ============================================================
+# LLM
+# ============================================================
 
-# 2. PDF retriever store (per thread)
-# -------------------
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile"
+)
+
+
+# ============================================================
+# EMBEDDING MODEL
+# ============================================================
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# ============================================================
+# THREAD-BASED PDF RETRIEVERS
+# ============================================================
+
 _THREAD_RETRIEVERS: Dict[str, Any] = {}
 _THREAD_METADATA: Dict[str, dict] = {}
 
+
 def _get_retriever(thread_id: Optional[str]):
-    """Fetch the retriever for a thread if available."""
+    """
+    Fetch the retriever for a thread if available.
+    """
+
     if thread_id and thread_id in _THREAD_RETRIEVERS:
         return _THREAD_RETRIEVERS[thread_id]
+
     return None
 
 
-def ingest_pdf(file_bytes: bytes, thread_id: str, filename: Optional[str] = None) -> dict:
-    """
-    Build a FAISS retriever for the uploaded PDF and store it for the thread.
+# ============================================================
+# PDF INGESTION
+# ============================================================
 
-    Returns a summary dict that can be surfaced in the UI.
+def ingest_pdf(
+    file_bytes: bytes,
+    thread_id: str,
+    filename: Optional[str] = None
+) -> dict:
     """
+    Build a FAISS retriever for the uploaded PDF
+    and store it for the specific chat thread.
+    """
+
     if not file_bytes:
         raise ValueError("No bytes received for ingestion.")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+    # Create temporary PDF file
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".pdf"
+    ) as temp_file:
+
         temp_file.write(file_bytes)
         temp_path = temp_file.name
 
     try:
+
+        # Load PDF
         loader = PyPDFLoader(temp_path)
+
         docs = loader.load()
 
+        # Split documents
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200, separators=["\n\n", "\n", " ", ""]
+            chunk_size=1000,
+            chunk_overlap=200,
+            separators=[
+                "\n\n",
+                "\n",
+                " ",
+                ""
+            ]
         )
+
         chunks = splitter.split_documents(docs)
 
-        vector_store = FAISS.from_documents(chunks, embeddings)
-        retriever = vector_store.as_retriever(
-            search_type="similarity", search_kwargs={"k": 4}
+        # Create FAISS vector store
+        vector_store = FAISS.from_documents(
+            chunks,
+            embeddings
         )
 
+        # Create retriever
+        retriever = vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={
+                "k": 4
+            }
+        )
+
+        # Store retriever for this thread
         _THREAD_RETRIEVERS[str(thread_id)] = retriever
+
+        # Store metadata
         _THREAD_METADATA[str(thread_id)] = {
             "filename": filename or os.path.basename(temp_path),
             "documents": len(docs),
-            "chunks": len(chunks),
+            "chunks": len(chunks)
         }
 
         return {
             "filename": filename or os.path.basename(temp_path),
             "documents": len(docs),
-            "chunks": len(chunks),
+            "chunks": len(chunks)
         }
+
     finally:
-        # The FAISS store keeps copies of the text, so the temp file is safe to remove.
+
+        # Remove temporary file
         try:
             os.remove(temp_path)
         except OSError:
             pass
 
 
-## search tool
-search_tool=DuckDuckGoSearchRun(region='us-en')
+# ============================================================
+# SEARCH TOOL
+# ============================================================
+
+search_tool = DuckDuckGoSearchRun(
+    region="us-en"
+)
 
 
-# calculator tool
+# ============================================================
+# CALCULATOR TOOL
+# ============================================================
+
 @tool
-def calculator(first_num:float,second_num:float,operation:str)->dict:
-    """"
-    
-    perform a basic arithematic operations on two numbers.
-    Supported operations:add,sub,mul,div
+def calculator(
+    first_num: float,
+    second_num: float,
+    operation: str
+) -> dict:
+    """
+    Perform basic arithmetic operations on two numbers.
+
+    Supported operations:
+    add, sub, mul, div
     """
 
     try:
-        if operation=='add':
-            result=first_num+second_num
-        elif operation=='sub':
-            result=first_num-second_num
-        elif operation=='mul':
-            result=first_num*second_num
-        elif operation=='div':
-            if second_num==0:
-                return{'error':'division by zero is not allowed'}
-            result=first_num/second_num
+
+        if operation == "add":
+
+            result = first_num + second_num
+
+        elif operation == "sub":
+
+            result = first_num - second_num
+
+        elif operation == "mul":
+
+            result = first_num * second_num
+
+        elif operation == "div":
+
+            if second_num == 0:
+
+                return {
+                    "error": "division by zero is not allowed"
+                }
+
+            result = first_num / second_num
+
         else:
-            return{'error':f"unsupported operation'{operation}'"}
 
-        return{'first_num':first_num,'second_num':second_num,'operation':operation,'result':result}
-    except Exception as e:
-        return{"error":str(e)}
+            return {
+                "error": f"unsupported operation '{operation}'"
+            }
 
-
-# stockprice tool
-
-@tool
-def get_stock_price(symbol:str)->dict:
-    """"
-    Fetch the latest stock price for given symbol (e.g. 'APPL'.'TSLA')
-    using alpha vantage api key in the url
-    """
-
-    url=f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey=1CKDMBQ4CVMGM1YW"
-    r=requests.get(url)
-    return r.json()
-
-@tool
-def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
-    """
-    Retrieve relevant information from the uploaded PDF for this chat thread.
-    Always include the thread_id when calling this tool.
-    """
-    retriever = _get_retriever(thread_id)
-    if retriever is None:
         return {
-            "error": "No document indexed for this chat. Upload a PDF first.",
-            "query": query,
+            "first_num": first_num,
+            "second_num": second_num,
+            "operation": operation,
+            "result": result
         }
 
-    result = retriever.invoke(query)
-    context = [doc.page_content for doc in result]
-    metadata = [doc.metadata for doc in result]
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
+
+
+# ============================================================
+# STOCK PRICE TOOL
+# ============================================================
+
+@tool
+def get_stock_price(symbol: str) -> dict:
+    """
+    Fetch the latest stock price for a given symbol.
+
+    Example:
+    AAPL
+    TSLA
+    """
+
+    api_key = os.getenv("ALPHAVANTAGE_API_KEY")
+
+    if not api_key:
+
+        return {
+            "error": "ALPHAVANTAGE_API_KEY is not configured."
+        }
+
+    url = (
+        "https://www.alphavantage.co/query"
+        f"?function=GLOBAL_QUOTE"
+        f"&symbol={symbol}"
+        f"&apikey={api_key}"
+    )
+
+    try:
+
+        response = requests.get(
+            url,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except requests.RequestException as e:
+
+        return {
+            "error": str(e)
+        }
+
+
+# ============================================================
+# RAG TOOL
+# ============================================================
+
+@tool
+def rag_tool(
+    query: str,
+    thread_id: Optional[str] = None
+) -> dict:
+    """
+    Retrieve relevant information from the uploaded PDF
+    for the current chat thread.
+
+    Always provide the thread_id when calling this tool.
+    """
+
+    retriever = _get_retriever(thread_id)
+
+    if retriever is None:
+
+        return {
+            "error": "No document indexed for this chat. Upload a PDF first.",
+            "query": query
+        }
+
+    try:
+
+        result = retriever.invoke(query)
+
+        context = [
+            doc.page_content
+            for doc in result
+        ]
+
+        metadata = [
+            doc.metadata
+            for doc in result
+        ]
+
+        return {
+            "query": query,
+            "context": context,
+            "metadata": metadata,
+            "source_file": _THREAD_METADATA
+                .get(str(thread_id), {})
+                .get("filename")
+        }
+
+    except Exception as e:
+
+        return {
+            "error": str(e),
+            "query": query
+        }
+
+
+# ============================================================
+# TOOL LIST
+# ============================================================
+
+tools = [
+    get_stock_price,
+    search_tool,
+    calculator,
+    rag_tool
+]
+
+
+# ============================================================
+# LLM WITH TOOLS
+# ============================================================
+
+llm_with_tools = llm.bind_tools(tools)
+
+
+# ============================================================
+# CHAT NODE
+# ============================================================
+
+def chat_node(state: ChatState):
+    """
+    LLM node that may answer directly
+    or request a tool call.
+    """
+
+    messages = state["messages"]
+
+    response = llm_with_tools.invoke(messages)
 
     return {
-        "query": query,
-        "context": context,
-        "metadata": metadata,
-        "source_file": _THREAD_METADATA.get(str(thread_id), {}).get("filename"),
+        "messages": [response]
     }
 
-## make tool list
-tools=[get_stock_price,search_tool,calculator,rag_tool]
 
-# make the llm tool-aware
-llm_with_tools=llm.bind_tools(tools)
+# ============================================================
+# TOOL NODE
+# ============================================================
 
-#state
-class ChatState(TypedDict):
-    messages: Annotated[list[BaseMessage],add_messages]
-
-# graph node
-def chat_node(state:ChatState):
-    """"LLM node that may answer or request a tool call"""
-    messages=state['messages']
-    response=llm_with_tools.invoke(messages)
-    return{'messages':[response]}
-
-tool_node=ToolNode(tools)   # execute tool calls
+tool_node = ToolNode(tools)
 
 
-#graph
-#graph structure
-graph=StateGraph(ChatState)
-graph.add_node('chat_node',chat_node)
-graph.add_node('tools',tool_node)
+# ============================================================
+# GRAPH
+# ============================================================
 
-graph.add_edge(START,'chat_node')
-graph.add_conditional_edges('chat_node',tools_condition)
-graph.add_edge("tools","chat_node")
+graph = StateGraph(ChatState)
+
+graph.add_node(
+    "chat_node",
+    chat_node
+)
+
+graph.add_node(
+    "tools",
+    tool_node
+)
 
 
-#checkpointers
+# START → CHAT
+
+graph.add_edge(
+    START,
+    "chat_node"
+)
+
+
+# CHAT → TOOLS or END
+
+graph.add_conditional_edges(
+    "chat_node",
+    tools_condition
+)
+
+
+# TOOLS → CHAT
+
+graph.add_edge(
+    "tools",
+    "chat_node"
+)
+
+
+# ============================================================
+# SQLITE CHECKPOINTER
+# ============================================================
+
 conn = sqlite3.connect(
-    database="chatbot_db",
+    "chatbot_db.sqlite",
     check_same_thread=False
 )
 
-checkpointer = SqliteSaver(conn=conn)
+checkpointer = SqliteSaver(
+    conn
+)
+
+
+# ============================================================
+# COMPILE GRAPH
+# ============================================================
 
 chatbot = graph.compile(
     checkpointer=checkpointer
 )
 
+
+# ============================================================
+# RETRIEVE ALL THREADS
+# ============================================================
+
 def retrieve_all_threads():
+
     all_threads = set()
 
     for checkpoint in checkpointer.list(None):
-        thread_id = checkpoint.config["configurable"]["thread_id"]
+
+        thread_id = (
+            checkpoint.config["configurable"]["thread_id"]
+        )
+
         all_threads.add(thread_id)
 
     return list(all_threads)
 
+
+# ============================================================
+# CHECK WHETHER THREAD HAS DOCUMENT
+# ============================================================
+
 def thread_has_document(thread_id: str) -> bool:
+
     return str(thread_id) in _THREAD_RETRIEVERS
 
 
+# ============================================================
+# GET THREAD DOCUMENT METADATA
+# ============================================================
+
 def thread_document_metadata(thread_id: str) -> dict:
-    return _THREAD_METADATA.get(str(thread_id), {})
+
+    return _THREAD_METADATA.get(
+        str(thread_id),
+        {}
+    )
