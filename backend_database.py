@@ -85,7 +85,6 @@ def _get_retriever(thread_id: Optional[str]):
 # ============================================================
 # PDF INGESTION
 # ============================================================
-
 def ingest_pdf(
     file_bytes: bytes,
     thread_id: str,
@@ -99,21 +98,29 @@ def ingest_pdf(
     if not file_bytes:
         raise ValueError("No bytes received for ingestion.")
 
-    # Create temporary PDF file
     with tempfile.NamedTemporaryFile(
         delete=False,
         suffix=".pdf"
     ) as temp_file:
-
         temp_file.write(file_bytes)
         temp_path = temp_file.name
 
     try:
-
         # Load PDF
         loader = PyPDFLoader(temp_path)
-
         docs = loader.load()
+
+        # Remove pages with no readable text
+        docs = [
+            doc for doc in docs
+            if doc.page_content and doc.page_content.strip()
+        ]
+
+        if not docs:
+            raise ValueError(
+                "No readable text could be extracted from this PDF. "
+                "The PDF may be scanned/image-based."
+            )
 
         # Split documents
         splitter = RecursiveCharacterTextSplitter(
@@ -129,7 +136,15 @@ def ingest_pdf(
 
         chunks = splitter.split_documents(docs)
 
-        # Create FAISS vector store
+        print(f"Documents loaded: {len(docs)}")
+        print(f"Chunks created: {len(chunks)}")
+
+        if not chunks:
+            raise ValueError(
+                "PDF produced no text chunks."
+            )
+
+        # Create FAISS vector store ONCE
         vector_store = FAISS.from_documents(
             chunks,
             embeddings
@@ -138,9 +153,7 @@ def ingest_pdf(
         # Create retriever
         retriever = vector_store.as_retriever(
             search_type="similarity",
-            search_kwargs={
-                "k": 4
-            }
+            search_kwargs={"k": 4}
         )
 
         # Store retriever for this thread
@@ -160,8 +173,6 @@ def ingest_pdf(
         }
 
     finally:
-
-        # Remove temporary file
         try:
             os.remove(temp_path)
         except OSError:
