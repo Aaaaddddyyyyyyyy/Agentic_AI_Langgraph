@@ -49,9 +49,7 @@ class ChatState(TypedDict):
 # LLM
 # ============================================================
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile"
-)
+llm =ChatGroq(model="openai/gpt-oss-120b")
 
 
 # ============================================================
