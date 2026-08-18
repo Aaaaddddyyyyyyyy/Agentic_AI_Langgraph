@@ -69,7 +69,7 @@ selected_thread = None
 # Sidebar
 # ============================================================
 
-st.sidebar.title("AdBoT")
+st.sidebar.title("GoGo")
 
 # New Chat
 if st.sidebar.button("➕ New Chat"):
@@ -162,7 +162,7 @@ if uploaded_pdf:
 # Main UI
 # ============================================================
 
-st.title("AdBoT")
+st.title("GoGo")
 
 
 # Display conversation history
