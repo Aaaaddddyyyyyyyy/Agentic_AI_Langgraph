@@ -17,7 +17,7 @@ load_dotenv()
 # -------------------
 # 1. LLM
 # -------------------
-llm = ChatGroq(model="llama-3.3-70b-versatile")
+llm = ChatGroq(model="openai/gpt-oss-120b")
 
 # -------------------
 # 2. Tools
