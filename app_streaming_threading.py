@@ -62,7 +62,7 @@ add_thread(st.session_state["thread_id"])
 # Sidebar UI
 # ============================================================
 
-st.sidebar.title("AdBoT")
+st.sidebar.title("GoGo")
 
 
 if st.sidebar.button("New Chat"):
@@ -104,7 +104,7 @@ for thread_id, title in st.session_state["chat_threads"].items():
 # Main UI
 # ============================================================
 
-st.title("AdBoT")
+st.title("GoGo")
 
 
 # Display conversation history
