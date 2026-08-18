@@ -3,9 +3,9 @@
 # ============================================================
 
 from langgraph.graph import StateGraph, START
-from typing import TypedDict, Annotated, Dict, Any, Optional
+from typing import TypedDict, Annotated, Optional
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage
 from langchain_core.tools import tool
 
 from langchain_groq import ChatGroq
@@ -31,7 +31,7 @@ import os
 
 
 # ============================================================
-# LOAD ENVIRONMENT VARIABLES
+# ENVIRONMENT
 # ============================================================
 
 load_dotenv()
@@ -49,11 +49,13 @@ class ChatState(TypedDict):
 # LLM
 # ============================================================
 
-llm =ChatGroq(model="openai/gpt-oss-120b")
+llm = ChatGroq(
+    model="openai/gpt-oss-120b"
+)
 
 
 # ============================================================
-# EMBEDDING MODEL
+# EMBEDDINGS
 # ============================================================
 
 embeddings = HuggingFaceEmbeddings(
@@ -62,20 +64,41 @@ embeddings = HuggingFaceEmbeddings(
 
 
 # ============================================================
-# THREAD-BASED PDF RETRIEVERS
+# PDF RETRIEVERS
 # ============================================================
 
-_THREAD_RETRIEVERS: Dict[str, Any] = {}
-_THREAD_METADATA: Dict[str, dict] = {}
+_THREAD_RETRIEVERS = {}
+
+_THREAD_METADATA = {}
+
+CURRENT_THREAD_ID = None
 
 
-def _get_retriever(thread_id: Optional[str]):
-    """
-    Fetch the retriever for a thread if available.
-    """
+# ============================================================
+# CURRENT THREAD
+# ============================================================
 
-    if thread_id and thread_id in _THREAD_RETRIEVERS:
-        return _THREAD_RETRIEVERS[thread_id]
+def set_current_thread(thread_id: str):
+    global CURRENT_THREAD_ID
+
+    CURRENT_THREAD_ID = str(thread_id)
+
+
+# ============================================================
+# GET RETRIEVER
+# ============================================================
+
+def _get_retriever(thread_id=None):
+
+    if thread_id:
+        return _THREAD_RETRIEVERS.get(
+            str(thread_id)
+        )
+
+    if CURRENT_THREAD_ID:
+        return _THREAD_RETRIEVERS.get(
+            CURRENT_THREAD_ID
+        )
 
     return None
 
@@ -83,102 +106,155 @@ def _get_retriever(thread_id: Optional[str]):
 # ============================================================
 # PDF INGESTION
 # ============================================================
+
 def ingest_pdf(
     file_bytes: bytes,
     thread_id: str,
     filename: Optional[str] = None
-) -> dict:
-    """
-    Build a FAISS retriever for the uploaded PDF
-    and store it for the specific chat thread.
-    """
+):
 
     if not file_bytes:
-        raise ValueError("No bytes received for ingestion.")
+        raise ValueError(
+            "No PDF data received."
+        )
+
+    thread_id = str(thread_id)
+
+    # --------------------------------------------------------
+    # Create temporary PDF
+    # --------------------------------------------------------
 
     with tempfile.NamedTemporaryFile(
         delete=False,
         suffix=".pdf"
     ) as temp_file:
+
         temp_file.write(file_bytes)
+
         temp_path = temp_file.name
 
-    try:
-        # Load PDF
-        loader = PyPDFLoader(temp_path)
-        docs = loader.load()
 
-        # Remove pages with no readable text
-        docs = [
-            doc for doc in docs
-            if doc.page_content and doc.page_content.strip()
+    try:
+
+        # ----------------------------------------------------
+        # Load PDF
+        # ----------------------------------------------------
+
+        loader = PyPDFLoader(
+            temp_path
+        )
+
+        documents = loader.load()
+
+
+        # ----------------------------------------------------
+        # Remove empty pages
+        # ----------------------------------------------------
+
+        documents = [
+            doc
+            for doc in documents
+            if doc.page_content
+            and doc.page_content.strip()
         ]
 
-        if not docs:
+
+        if not documents:
+
             raise ValueError(
-                "No readable text could be extracted from this PDF. "
+                "No readable text found in this PDF. "
                 "The PDF may be scanned/image-based."
             )
 
-        # Split documents
+
+        # ----------------------------------------------------
+        # Split text
+        # ----------------------------------------------------
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
-            chunk_overlap=200,
-            separators=[
-                "\n\n",
-                "\n",
-                " ",
-                ""
-            ]
+            chunk_overlap=200
         )
 
-        chunks = splitter.split_documents(docs)
 
-        print(f"Documents loaded: {len(docs)}")
-        print(f"Chunks created: {len(chunks)}")
+        chunks = splitter.split_documents(
+            documents
+        )
+
 
         if not chunks:
+
             raise ValueError(
-                "PDF produced no text chunks."
+                "No text chunks were created."
             )
 
-        # Create FAISS vector store ONCE
+
+        # ----------------------------------------------------
+        # Create FAISS
+        # ----------------------------------------------------
+
         vector_store = FAISS.from_documents(
             chunks,
             embeddings
         )
 
+
+        # ----------------------------------------------------
         # Create retriever
+        # ----------------------------------------------------
+
         retriever = vector_store.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": 4}
+            search_kwargs={
+                "k": 4
+            }
         )
 
-        # Store retriever for this thread
-        _THREAD_RETRIEVERS[str(thread_id)] = retriever
 
+        # ----------------------------------------------------
+        # Store retriever
+        # ----------------------------------------------------
+
+        _THREAD_RETRIEVERS[
+            thread_id
+        ] = retriever
+
+
+        # ----------------------------------------------------
         # Store metadata
-        _THREAD_METADATA[str(thread_id)] = {
-            "filename": filename or os.path.basename(temp_path),
-            "documents": len(docs),
+        # ----------------------------------------------------
+
+        _THREAD_METADATA[
+            thread_id
+        ] = {
+            "filename": filename or "uploaded.pdf",
+            "documents": len(documents),
             "chunks": len(chunks)
         }
+
 
         return {
-            "filename": filename or os.path.basename(temp_path),
-            "documents": len(docs),
+            "filename": filename or "uploaded.pdf",
+            "documents": len(documents),
             "chunks": len(chunks)
         }
 
+
     finally:
+
         try:
-            os.remove(temp_path)
+
+            os.remove(
+                temp_path
+            )
+
         except OSError:
+
             pass
 
 
 # ============================================================
-# SEARCH TOOL
+# WEB SEARCH
 # ============================================================
 
 search_tool = DuckDuckGoSearchRun(
@@ -187,7 +263,7 @@ search_tool = DuckDuckGoSearchRun(
 
 
 # ============================================================
-# CALCULATOR TOOL
+# CALCULATOR
 # ============================================================
 
 @tool
@@ -196,11 +272,15 @@ def calculator(
     second_num: float,
     operation: str
 ) -> dict:
+
     """
-    Perform basic arithmetic operations on two numbers.
+    Perform basic arithmetic.
 
     Supported operations:
-    add, sub, mul, div
+    add
+    sub
+    mul
+    div
     """
 
     try:
@@ -222,7 +302,8 @@ def calculator(
             if second_num == 0:
 
                 return {
-                    "error": "division by zero is not allowed"
+                    "error":
+                    "Division by zero is not allowed."
                 }
 
             result = first_num / second_num
@@ -230,8 +311,10 @@ def calculator(
         else:
 
             return {
-                "error": f"unsupported operation '{operation}'"
+                "error":
+                f"Unsupported operation: {operation}"
             }
+
 
         return {
             "first_num": first_num,
@@ -239,6 +322,7 @@ def calculator(
             "operation": operation,
             "result": result
         }
+
 
     except Exception as e:
 
@@ -248,33 +332,38 @@ def calculator(
 
 
 # ============================================================
-# STOCK PRICE TOOL
+# STOCK PRICE
 # ============================================================
 
 @tool
-def get_stock_price(symbol: str) -> dict:
-    """
-    Fetch the latest stock price for a given symbol.
+def get_stock_price(
+    symbol: str
+) -> dict:
 
-    Example:
-    AAPL
-    TSLA
+    """
+    Fetch latest stock price.
     """
 
-    api_key = os.getenv("ALPHAVANTAGE_API_KEY")
+    api_key = os.getenv(
+        "ALPHAVANTAGE_API_KEY"
+    )
+
 
     if not api_key:
 
         return {
-            "error": "ALPHAVANTAGE_API_KEY is not configured."
+            "error":
+            "ALPHAVANTAGE_API_KEY is not configured."
         }
+
 
     url = (
         "https://www.alphavantage.co/query"
-        f"?function=GLOBAL_QUOTE"
+        "?function=GLOBAL_QUOTE"
         f"&symbol={symbol}"
         f"&apikey={api_key}"
     )
+
 
     try:
 
@@ -287,6 +376,7 @@ def get_stock_price(symbol: str) -> dict:
 
         return response.json()
 
+
     except requests.RequestException as e:
 
         return {
@@ -295,70 +385,102 @@ def get_stock_price(symbol: str) -> dict:
 
 
 # ============================================================
-# RAG TOOL
+# PDF RAG TOOL
 # ============================================================
 
 @tool
 def rag_tool(
-    query: str,
-    thread_id: Optional[str] = None
+    query: str
 ) -> dict:
-    """
-    Retrieve relevant information from the uploaded PDF
-    for the current chat thread.
 
-    Always provide the thread_id when calling this tool.
+    """
+    Search the PDF uploaded in the current conversation.
+
+    ALWAYS use this tool when the user asks a question
+    about the uploaded PDF or its contents.
     """
 
-    retriever = _get_retriever(thread_id)
+    retriever = _get_retriever()
+
 
     if retriever is None:
 
         return {
-            "error": "No document indexed for this chat. Upload a PDF first.",
-            "query": query
+            "error":
+            "No PDF has been uploaded for this conversation."
         }
+
 
     try:
 
-        result = retriever.invoke(query)
+        docs = retriever.invoke(
+            query
+        )
 
-        context = [
-            doc.page_content
-            for doc in result
-        ]
 
-        metadata = [
-            doc.metadata
-            for doc in result
-        ]
+        context = []
+
+
+        for doc in docs:
+
+            context.append({
+
+                "text":
+                doc.page_content,
+
+                "page":
+                doc.metadata.get(
+                    "page",
+                    "unknown"
+                ),
+
+                "source":
+                doc.metadata.get(
+                    "source",
+                    ""
+                )
+            })
+
 
         return {
+
             "query": query,
+
             "context": context,
-            "metadata": metadata,
-            "source_file": _THREAD_METADATA
-                .get(str(thread_id), {})
-                .get("filename")
+
+            "source_file":
+            _THREAD_METADATA
+            .get(
+                CURRENT_THREAD_ID,
+                {}
+            )
+            .get(
+                "filename"
+            )
         }
+
 
     except Exception as e:
 
         return {
-            "error": str(e),
-            "query": query
+            "error": str(e)
         }
 
 
 # ============================================================
-# TOOL LIST
+# TOOLS
 # ============================================================
 
 tools = [
+
     get_stock_price,
+
     search_tool,
+
     calculator,
+
     rag_tool
+
 ]
 
 
@@ -366,25 +488,66 @@ tools = [
 # LLM WITH TOOLS
 # ============================================================
 
-llm_with_tools = llm.bind_tools(tools)
+llm_with_tools = llm.bind_tools(
+    tools
+)
 
 
 # ============================================================
 # CHAT NODE
 # ============================================================
 
-def chat_node(state: ChatState):
-    """
-    LLM node that may answer directly
-    or request a tool call.
-    """
+def chat_node(
+    state: ChatState
+):
 
     messages = state["messages"]
 
-    response = llm_with_tools.invoke(messages)
+
+    system_message = {
+        "role": "system",
+        "content": """
+You are a helpful AI assistant.
+
+You have access to these tools:
+
+1. rag_tool
+2. calculator
+3. get_stock_price
+4. web search
+
+IMPORTANT PDF RULE:
+
+If the user asks anything about an uploaded PDF,
+document, report, book, notes, or its contents,
+you MUST use rag_tool.
+
+Do NOT answer PDF-related questions from your
+general knowledge.
+
+Use the retrieved PDF context to answer.
+
+If no PDF is available, tell the user to upload
+a PDF first.
+
+For normal questions, answer normally or use
+the appropriate tool.
+"""
+    }
+
+
+    response = llm_with_tools.invoke(
+        [
+            system_message,
+            *messages
+        ]
+    )
+
 
     return {
-        "messages": [response]
+        "messages": [
+            response
+        ]
     }
 
 
@@ -392,19 +555,25 @@ def chat_node(state: ChatState):
 # TOOL NODE
 # ============================================================
 
-tool_node = ToolNode(tools)
+tool_node = ToolNode(
+    tools
+)
 
 
 # ============================================================
 # GRAPH
 # ============================================================
 
-graph = StateGraph(ChatState)
+graph = StateGraph(
+    ChatState
+)
+
 
 graph.add_node(
     "chat_node",
     chat_node
 )
+
 
 graph.add_node(
     "tools",
@@ -412,23 +581,17 @@ graph.add_node(
 )
 
 
-# START → CHAT
-
 graph.add_edge(
     START,
     "chat_node"
 )
 
 
-# CHAT → TOOLS or END
-
 graph.add_conditional_edges(
     "chat_node",
     tools_condition
 )
 
-
-# TOOLS → CHAT
 
 graph.add_edge(
     "tools",
@@ -437,7 +600,7 @@ graph.add_edge(
 
 
 # ============================================================
-# SQLITE CHECKPOINTER
+# SQLITE
 # ============================================================
 
 conn = sqlite3.connect(
@@ -445,13 +608,14 @@ conn = sqlite3.connect(
     check_same_thread=False
 )
 
+
 checkpointer = SqliteSaver(
     conn
 )
 
 
 # ============================================================
-# COMPILE GRAPH
+# COMPILE
 # ============================================================
 
 chatbot = graph.compile(
@@ -460,40 +624,55 @@ chatbot = graph.compile(
 
 
 # ============================================================
-# RETRIEVE ALL THREADS
+# RETRIEVE THREADS
 # ============================================================
 
 def retrieve_all_threads():
 
     all_threads = set()
 
+
     for checkpoint in checkpointer.list(None):
 
         thread_id = (
-            checkpoint.config["configurable"]["thread_id"]
+            checkpoint
+            .config["configurable"]
+            ["thread_id"]
         )
 
-        all_threads.add(thread_id)
+        all_threads.add(
+            thread_id
+        )
 
-    return list(all_threads)
 
-
-# ============================================================
-# CHECK WHETHER THREAD HAS DOCUMENT
-# ============================================================
-
-def thread_has_document(thread_id: str) -> bool:
-
-    return str(thread_id) in _THREAD_RETRIEVERS
+    return list(
+        all_threads
+    )
 
 
 # ============================================================
-# GET THREAD DOCUMENT METADATA
+# THREAD DOCUMENT METADATA
 # ============================================================
 
-def thread_document_metadata(thread_id: str) -> dict:
+def thread_document_metadata(
+    thread_id: str
+):
 
     return _THREAD_METADATA.get(
         str(thread_id),
         {}
+    )
+
+
+# ============================================================
+# THREAD DOCUMENT CHECK
+# ============================================================
+
+def thread_has_document(
+    thread_id: str
+):
+
+    return (
+        str(thread_id)
+        in _THREAD_RETRIEVERS
     )
